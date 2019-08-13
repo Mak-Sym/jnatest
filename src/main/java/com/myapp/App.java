@@ -45,8 +45,9 @@ public class App {
                     throw new RuntimeException("Invalid command line! Parameter \"platform\" should be \"osx\", " +
                             "\"win\" or \"linux\"");
             }
-
-            log.info("{}: {}", memInfo.name(), memInfo.stat());
+            Object res = memInfo.stat();
+            log.info("-------------------------");
+            log.info("{}: {}", memInfo.name(), res);
         } catch (Throwable e) {
             log.error("Major error:", e);
         }
@@ -54,7 +55,9 @@ public class App {
 }
 
 interface MemInfo<T> {
-    String name();
+    default String name() {
+        return "Available memory";
+    }
     T stat();
 }
 
@@ -77,11 +80,6 @@ class MacOSMemoryStats implements MemInfo<Integer> {
 
 class WindowsMemoryStats implements MemInfo<Long> {
     @Override
-    public String name() {
-        return "Available memory";
-    }
-
-    @Override
     public Long stat() {
         PERFORMANCE_INFORMATION perfInfo = new PERFORMANCE_INFORMATION();
         if (!Psapi.INSTANCE.GetPerformanceInfo(perfInfo, perfInfo.size())) {
@@ -92,11 +90,6 @@ class WindowsMemoryStats implements MemInfo<Long> {
 }
 
 class LinuxMemoryStats implements MemInfo<Long> {
-    @Override
-    public String name() {
-        return "Available memory";
-    }
-
     @Override
     public Long stat() {
         final String filename = "/proc/meminfo";
