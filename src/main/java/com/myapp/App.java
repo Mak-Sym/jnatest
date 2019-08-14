@@ -6,6 +6,7 @@ import com.sun.jna.platform.mac.SystemB.VMStatistics;
 import com.sun.jna.platform.win32.Kernel32;
 import com.sun.jna.platform.win32.Psapi;
 import com.sun.jna.platform.win32.Psapi.PERFORMANCE_INFORMATION;
+import com.sun.jna.platform.win32.WinNT.OSVERSIONINFOEX;
 import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +16,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Hello world!
@@ -30,68 +36,116 @@ public class App {
                         "Usage:\n" +
                         "java -jar jnatest-1.0-SNAPSHOT.jar win|osx|linux");
             }
-            MemInfo memInfo;
+            OsStat osStat;
             switch (args[0]) {
                 case "win":
-                    memInfo = new WindowsMemoryStats();
+                    osStat = new CombinedOsStat(new WindowsOsInfo(), new WindowsMemoryStats());
                     break;
                 case "osx":
-                    memInfo = new MacOSMemoryStats();
+                    osStat = new MacOSMemoryStats();
                     break;
                 case "linux":
-                    memInfo = new LinuxMemoryStats();
+                    osStat = new LinuxMemoryStats();
                     break;
                 default:
                     throw new RuntimeException("Invalid command line! Parameter \"platform\" should be \"osx\", " +
                             "\"win\" or \"linux\"");
             }
-            Object res = memInfo.stat();
+            String res = osStat.stat();
             log.info("-------------------------");
-            log.info("{}: {}", memInfo.name(), res);
+            log.info("{}", res);
         } catch (Throwable e) {
             log.error("Major error:", e);
         }
     }
 }
 
-interface MemInfo<T> {
-    default String name() {
-        return "Available memory";
-    }
-    T stat();
+interface OsStat {
+    String stat();
 }
 
-class MacOSMemoryStats implements MemInfo<Integer> {
-    @Override
-    public String name() {
-        return "Available pages";
+class CombinedOsStat implements OsStat {
+    private Collection<OsStat> metrics;
+
+    public CombinedOsStat(OsStat... metrics) {
+        this.metrics = Arrays.asList(requireNonNull(metrics));
     }
 
     @Override
-    public Integer stat() {
+    public String stat() {
+        final StringBuilder res = new StringBuilder();
+        metrics.forEach(osStat -> res.append(osStat.stat()).append("\n"));
+        return res.toString();
+    }
+}
+
+class MacOSMemoryStats implements OsStat {
+    @Override
+    public String stat() {
         VMStatistics vmStats = new VMStatistics();
         if (0 != SystemB.INSTANCE.host_statistics(SystemB.INSTANCE.mach_host_self(), SystemB.HOST_VM_INFO, vmStats,
                 new IntByReference(vmStats.size() / SystemB.INT_SIZE))) {
             throw new RuntimeException("Failed to get host VM info. Error code: " + Native.getLastError());
         }
-        return vmStats.free_count + vmStats.inactive_count;
+        return "Free pages: " + (vmStats.free_count + vmStats.inactive_count);
     }
 }
 
-class WindowsMemoryStats implements MemInfo<Long> {
+class WindowsMemoryStats implements OsStat {
     @Override
-    public Long stat() {
+    public String stat() {
         PERFORMANCE_INFORMATION perfInfo = new PERFORMANCE_INFORMATION();
         if (!Psapi.INSTANCE.GetPerformanceInfo(perfInfo, perfInfo.size())) {
             throw new RuntimeException("Failed to get Performance Info. Error code: " + Kernel32.INSTANCE.GetLastError());
         }
-        return perfInfo.PageSize.longValue() * perfInfo.PhysicalAvailable.longValue();
+        return "Available memory: " + (perfInfo.PageSize.longValue() * perfInfo.PhysicalAvailable.longValue());
     }
 }
 
-class LinuxMemoryStats implements MemInfo<Long> {
+class WindowsOsInfo implements OsStat {
     @Override
-    public Long stat() {
+    public String stat() {
+        OSVERSIONINFOEX versionInfo = new OSVERSIONINFOEX();
+        if (!Kernel32.INSTANCE.GetVersionEx(versionInfo)) {
+            throw new RuntimeException("Failed to Initialize OSVersionInfoEx. Error code: " + Kernel32.INSTANCE.GetLastError());
+        }
+        return "OS code name: " + parseCodeName(versionInfo.wSuiteMask.intValue())
+                + "\nBuild: " + versionInfo.dwBuildNumber.toString();
+    }
+
+    private String parseCodeName(int suiteMask) {
+        List<String> suites = new ArrayList<>();
+        if ((suiteMask & 0x00000002) != 0) {
+            suites.add("Enterprise");
+        }
+        if ((suiteMask & 0x00000004) != 0) {
+            suites.add("BackOffice");
+        }
+        if ((suiteMask & 0x00000008) != 0) {
+            suites.add("Communication Server");
+        }
+        if ((suiteMask & 0x00000080) != 0) {
+            suites.add("Datacenter");
+        }
+        if ((suiteMask & 0x00000200) != 0) {
+            suites.add("Home");
+        }
+        if ((suiteMask & 0x00000400) != 0) {
+            suites.add("Web Server");
+        }
+        if ((suiteMask & 0x00002000) != 0) {
+            suites.add("Storage Server");
+        }
+        if ((suiteMask & 0x00004000) != 0) {
+            suites.add("Compute Cluster");
+        }
+        return String.join(",", suites);
+    }
+}
+
+class LinuxMemoryStats implements OsStat {
+    @Override
+    public String stat() {
         final String filename = "/proc/meminfo";
         if (new File(filename).exists()) {
             try {
@@ -101,16 +155,16 @@ class LinuxMemoryStats implements MemInfo<Long> {
                     if (memorySplit.length > 1 && "MemAvailable:".equals(memorySplit[0])) {
                         long memory = 0L;
                         try {
-                            return Long.parseLong(memorySplit[1]);
+                            return "Available memory: " + memorySplit[1];
                         } catch (NumberFormatException ignored) {
                         }
                         if (memorySplit.length > 2 && "kB".equals(memorySplit[2])) {
                             memory *= 1024;
                         }
-                        return memory;
+                        return "Available memory: " + memory;
                     }
                 }
-                return 0L;
+                return "Available memory: Not detected";
             } catch (IOException e) {
                 throw new RuntimeException("Error reading file \"/proc/meminfo\"", e);
             }
