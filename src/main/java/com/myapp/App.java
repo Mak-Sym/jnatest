@@ -4,8 +4,6 @@ import com.sun.jna.Native;
 import com.sun.jna.platform.mac.SystemB;
 import com.sun.jna.platform.mac.SystemB.VMStatistics;
 import com.sun.jna.platform.win32.Kernel32;
-import com.sun.jna.platform.win32.Psapi;
-import com.sun.jna.platform.win32.Psapi.PERFORMANCE_INFORMATION;
 import com.sun.jna.platform.win32.WinNT.OSVERSIONINFOEX;
 import com.sun.jna.ptr.IntByReference;
 import org.slf4j.Logger;
@@ -23,6 +21,8 @@ import java.util.List;
 
 import static java.util.Objects.requireNonNull;
 
+//import com.sun.jna.platform.win32.Psapi.PERFORMANCE_INFORMATION;
+
 /**
  * Hello world!
  */
@@ -39,7 +39,7 @@ public class App {
             OsStat osStat;
             switch (args[0]) {
                 case "win":
-                    osStat = new CombinedOsStat(new WindowsOsInfo(), new WindowsMemoryStats());
+                    osStat = new CombinedOsStat(new WindowsOsInfo()/*, new WindowsMemoryStats()*/);
                     break;
                 case "osx":
                     osStat = new MacOSMemoryStats();
@@ -91,16 +91,22 @@ class MacOSMemoryStats implements OsStat {
     }
 }
 
-class WindowsMemoryStats implements OsStat {
+/*class WindowsMemoryStats implements OsStat {
     @Override
     public String stat() {
+        OSVERSIONINFOEX versionInfo = new OSVERSIONINFOEX();
+        if (!Kernel32.INSTANCE.GetVersionEx(versionInfo)) {
+            throw new RuntimeException("Failed to Initialize OSVersionInfoEx. Error code: " + Kernel32.INSTANCE.GetLastError());
+        }
+
+
         PERFORMANCE_INFORMATION perfInfo = new PERFORMANCE_INFORMATION();
         if (!Psapi.INSTANCE.GetPerformanceInfo(perfInfo, perfInfo.size())) {
             throw new RuntimeException("Failed to get Performance Info. Error code: " + Kernel32.INSTANCE.GetLastError());
         }
         return "Available memory: " + (perfInfo.PageSize.longValue() * perfInfo.PhysicalAvailable.longValue());
     }
-}
+}*/
 
 class WindowsOsInfo implements OsStat {
     @Override
